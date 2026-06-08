@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<modification>
+    <name>OpenCart-Module-Remover</name>
+    <code>delete_module_files_admin_v2</code>
+    <version>1.2</version>
+    <author>Denis</author>
+    <link>#</link>
+
+    <!-- Модификация контроллера (Логика удаления) -->
+    <file path="admin/controller/extension/extension/module.php">
+        <operation>
+            <search trim="true"><![CDATA['uninstall' => $this->url->link('extension/extension/module/uninstall', 'user_token=' . $this->session->data['user_token'] . '&extension=' . $extension, true),]]></search>
+            <add position="after"><![CDATA[
+            'delete_files' => $this->url->link('extension/extension/module/deleteFiles', 'user_token=' . $this->session->data['user_token'] . '&extension=' . $extension, true),
+            ]]></add>
+        </operation>
+
+        <operation>
+            <search trim="true"><![CDATA[protected function validate() {]]></search>
+            <add position="before"><![CDATA[
+    public function deleteFiles() {
+        $this->load->language('extension/extension/module');
+
+        if (!$this->user->hasPermission('modify', 'extension/extension/module')) {
+            $this->session->data['error'] = $this->language->get('error_permission');
+            $this->response->redirect($this->url->link('marketplace/extension', 'user_token=' . $this->session->data['user_token'] . '&type=module', true));
+        }
+
+        if (isset($this->request->get['extension'])) {
+            $extension = basename($this->request->get['extension']);
+
+            // 1. Удаляем из БД
+            $this->load->model('setting/extension');
+            $this->model_setting_extension->uninstall('module', $extension);
+            $this->load->model('setting/module');
+            $this->model_setting_module->deleteModulesByCode($extension);
+
+            // 2. Ищем и удаляем файлы
+            $files_to_delete = array(
+                DIR_APPLICATION . 'controller/extension/module/' . $extension . '.php',
+                DIR_APPLICATION . 'view/template/extension/module/' . $extension . '.twig',
+                DIR_CATALOG . 'controller/extension/module/' . $extension . '.php',
+                DIR_CATALOG . 'view/theme/default/template/extension/module/' . $extension . '.twig'
+            );
+
+            $this->load->model('localisation/language');
+            $languages = $this->model_localisation_language->getLanguages();
+            foreach ($languages as $language) {
+                $files_to_delete[] = DIR_APPLICATION . 'language/' . $language['code'] . '/extension/module/' . $extension . '.php';
+                $files_to_delete[] = DIR_CATALOG . 'language/' . $language['code'] . '/extension/module/' . $extension . '.php';
+            }
+
+            $deleted_count = 0;
+            foreach ($files_to_delete as $file) {
+                if (is_file($file)) {
+                    if (unlink($file)) {
+                        $deleted_count++;
+                    }
+                }
+            }
+
+            if ($deleted_count > 0) {
+                $this->session->data['success'] = 'Модуль деинсталлирован и его файлы (' . $deleted_count . ' шт.) физически удалены!';
+            } else {
+                $this->session->data['success'] = 'Модуль отключен, но стандартные файлы не найдены на сервере.';
+            }
+        }
+
+        $this->response->redirect($this->url->link('marketplace/extension', 'user_token=' . $this->session->data['user_token'] . '&type=module', true));
+    }
+            ]]></add>
+        </operation>
+    </file>
+
+    <!-- Модификация шаблона (Визуальная часть) -->
+    <file path="admin/view/template/extension/extension/module.twig">
+        <operation>
+            <!-- Привязываемся к логике Twig, а не к HTML тегам, это гарантирует правильное расположение -->
+            <search trim="true"><![CDATA[{% if not extension.installed %}]]></search>
+            <add position="before"><![CDATA[
+            <a href="{{ extension.delete_files }}" data-toggle="tooltip" title="Полностью удалить файлы" class="btn btn-warning" onclick="return confirm('ВНИМАНИЕ! Это действие безвозвратно удалит файлы модуля с сервера. Продолжить?');"><i class="fa fa-trash-o" aria-hidden="true"></i></a>&nbsp;
+            ]]></add>
+        </operation>
+    </file>
+</modification>
